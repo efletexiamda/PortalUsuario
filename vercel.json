@@ -1,0 +1,7 @@
+{
+  "version": 2,
+  "routes": [
+    { "src": "/api/portal", "dest": "/api/portal.js" },
+    { "src": "/(.*)",       "dest": "/public/$1"      }
+  ]
+}
