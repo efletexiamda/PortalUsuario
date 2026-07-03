@@ -158,10 +158,10 @@ TONO: Amable, profesional, orientado al usuario`;
     let jiraCtx = '';
 
     try {
-      // Detectar si pregunta por un ticket específico
-      const ticketMatch = userMsg.match(/TK-?\d+/i);
+      // Detectar si pregunta por un ticket específico (admite "TK691", "TK-691", "TK 691", minúsculas, etc.)
+      const ticketMatch = userMsg.match(/TK[\s-]?(\d+)/i);
       if (ticketMatch) {
-        const key = ticketMatch[0].toUpperCase().replace('TK-','TK-');
+        const key = `${JIRA_PROJ}-${ticketMatch[1]}`;
         const r = await fetch(`${JIRA_URL}/rest/api/3/issue/${key}`, { headers: JH });
         if (r.ok) {
           const d = await r.json();
@@ -181,6 +181,8 @@ CREADO: ${(f.created||'').slice(0,10)}
 ${f.description?`DESCRIPCIÓN: ${extractText(f.description).slice(0,200)}`:''}
 ${comments.length?`ÚLTIMOS COMENTARIOS:\n${comments.map(c=>`- ${c.author}: ${c.text}`).join('\n')}`:''}
 ===`;
+        } else {
+          jiraCtx = `\n\n=== TICKET ${key} ===\nNo se encontró ningún ticket con ese número. Informa al usuario que verifique el número e intente de nuevo.\n===`;
         }
       }
 
@@ -223,10 +225,10 @@ ${comments.length?`ÚLTIMOS COMENTARIOS:\n${comments.map(c=>`- ${c.author}: ${c.
     if (!query) return res.status(400).json({ error: 'Falta query' });
 
     try {
-      const isKey = query.match(/^TK-?\d+$/i);
+      const isKey = query.match(/^TK[\s-]?(\d+)$/i);
       let jql;
       if (isKey) {
-        const key = query.toUpperCase().replace('TK','TK');
+        const key = `${JIRA_PROJ}-${isKey[1]}`;
         jql = `key = "${key}"`;
       } else {
         jql = `project="${JIRA_PROJ}" AND (reporter~"${query}" OR summary~"${query}") ORDER BY created DESC`;
