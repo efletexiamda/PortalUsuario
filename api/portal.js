@@ -144,6 +144,11 @@ REGLAS:
 - Cuando tengas datos reales de Jira en el contexto, úsalos directamente
 - Nunca digas que no tienes acceso — sí lo tienes
 - Si el usuario pregunta por un ticket específico, da información detallada del estado
+- Si el usuario hace una pregunta general de "cómo hacer algo" (ej. "cómo libero una OPL"), busca en
+  la sección "TICKETS RESUELTOS SIMILARES" del contexto y explica la solución real aplicada en esos
+  casos, en pasos claros. Menciona el número de ticket (ej. TK-123) como referencia si es útil.
+- Si no hay tickets resueltos similares en el contexto, dilo con honestidad y sugiere crear un
+  "Nuevo Ticket" para que el equipo de soporte lo atienda directamente
 
 TONO: Amable, profesional, orientado al usuario`;
 
@@ -186,16 +191,36 @@ ${comments.length?`ÚLTIMOS COMENTARIOS:\n${comments.map(c=>`- ${c.author}: ${c.
         }
       }
 
-      // Buscar tickets del usuario si menciona su nombre
+      // Preguntas generales ("¿cómo libero una OPL?", etc.): buscar en tickets YA
+      // RESUELTOS palabras clave relevantes y usar su solución real como base de conocimiento.
       if (!ticketMatch && userMsg.length > 5) {
-        const words = userMsg.split(' ').filter(w => w.length > 3);
-        if (words.length > 0) {
+        const STOPWORDS = new Set(['como','cómo','para','que','qué','una','uno','unos','unas','los',
+          'las','del','con','por','favor','ayuda','ayudame','ayúdame','necesito','quiero','puedo',
+          'podria','podría','tengo','tener','hola','buenas','gracias','este','esta','estos','estas',
+          'cual','cuál','cuales','cuáles','donde','dónde','cuando','cuándo','pero','porque','sobre',
+          'hacer','hace','tiene','sido']);
+        const keywords = [...new Set(
+          userMsg.toLowerCase()
+            .replace(/[¿?¡!.,;:]/g,'')
+            .split(/\s+/)
+            .filter(w => w.length >= 3 && !STOPWORDS.has(w))
+        )].slice(0, 4);
+
+        if (keywords.length > 0) {
+          const clauses = keywords.map(k => `summary ~ "${k}" OR description ~ "${k}"`).join(' OR ');
+          // statusCategory = Done cubre "Resuelto", "Cerrado", "Done", etc. sin depender del idioma exacto
           const tickets = await searchJira(
-            `project="${JIRA_PROJ}" AND summary~"${words[0]}" ORDER BY created DESC`, 5
+            `project="${JIRA_PROJ}" AND statusCategory = Done AND (${clauses}) ORDER BY updated DESC`, 5
           ).catch(() => []);
+
           if (tickets.length) {
-            jiraCtx = `\n\nTICKETS RELACIONADOS:\n${tickets.map(t=>
-              `- ${t.key}: ${t.status} | ${t.summary.slice(0,60)}`).join('\n')}`;
+            jiraCtx = `\n\nTICKETS RESUELTOS SIMILARES (usa la solución real aplicada en estos casos para explicar los pasos al usuario):\n${
+              tickets.map(t => {
+                const lastComments = (t.comments||[]).slice(-2)
+                  .map(c => `  · ${c.author}: ${c.text}`).join('\n');
+                return `- ${t.key} [${t.status}]: ${t.summary}\n  Descripción: ${t.description?.slice(0,200)||'—'}${lastComments?`\n  Solución/comentarios:\n${lastComments}`:''}`;
+              }).join('\n')
+            }`;
           }
         }
       }
