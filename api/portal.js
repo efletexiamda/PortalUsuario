@@ -69,37 +69,70 @@ module.exports = async function handler(req, res) {
   }
 
   // ── Llamar a IA ───────────────────────────────────────
+  function sleep(ms) { return new Promise(res => setTimeout(res, ms)); }
+
+  async function callGroq(messages, system) {
+    const r = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type':'application/json', 'Authorization':`Bearer ${GROQ_KEY}` },
+      body: JSON.stringify({
+        model: 'llama-3.3-70b-versatile',
+        messages: [{ role:'system', content:system }, ...messages],
+        max_tokens: 800, temperature: 0.6
+      })
+    });
+    if (!r.ok) { const err = new Error(`Groq ${r.status}`); err.status = r.status; throw err; }
+    const d = await r.json();
+    return d.choices?.[0]?.message?.content || '';
+  }
+
+  async function callGemini(messages, system) {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_KEY}`;
+    const contents = [
+      { role:'user',  parts:[{text:system}] },
+      { role:'model', parts:[{text:'Entendido.'}] },
+      ...messages.map(m=>({ role:m.role==='assistant'?'model':'user', parts:[{text:m.content}] }))
+    ];
+    const r = await fetch(url, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ contents, generationConfig:{maxOutputTokens:800,temperature:0.6} })
+    });
+    if (!r.ok) { const err = new Error(`Gemini ${r.status}`); err.status = r.status; throw err; }
+    const d = await r.json();
+    return d.candidates?.[0]?.content?.parts?.[0]?.text || '';
+  }
+
+  // Reintenta con backoff cuando el proveedor responde 429 (cuota agotada / rate limit)
+  async function withRetry(fn, retries = 2, delayMs = 800) {
+    for (let attempt = 0; attempt <= retries; attempt++) {
+      try {
+        return await fn();
+      } catch (e) {
+        const is429 = e.status === 429 || /429/.test(e.message || '');
+        if (!is429 || attempt === retries) throw e;
+        await sleep(delayMs * (attempt + 1));
+      }
+    }
+  }
+
   async function callAI(messages, system) {
-    if (GROQ_KEY) {
-      const r = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-        method: 'POST',
-        headers: { 'Content-Type':'application/json', 'Authorization':`Bearer ${GROQ_KEY}` },
-        body: JSON.stringify({
-          model: 'llama-3.3-70b-versatile',
-          messages: [{ role:'system', content:system }, ...messages],
-          max_tokens: 800, temperature: 0.6
-        })
-      });
-      if (!r.ok) throw new Error(`Groq ${r.status}`);
-      const d = await r.json();
-      return d.choices?.[0]?.message?.content || '';
+    const providers = [];
+    if (GROQ_KEY)   providers.push(() => withRetry(() => callGroq(messages, system)));
+    if (GEMINI_KEY) providers.push(() => withRetry(() => callGemini(messages, system)));
+    if (!providers.length) throw new Error('No hay API Key de IA configurada');
+
+    let lastErr;
+    for (const call of providers) {
+      try {
+        return await call();
+      } catch (e) {
+        lastErr = e;
+      }
     }
-    if (GEMINI_KEY) {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_KEY}`;
-      const contents = [
-        { role:'user',  parts:[{text:system}] },
-        { role:'model', parts:[{text:'Entendido.'}] },
-        ...messages.map(m=>({ role:m.role==='assistant'?'model':'user', parts:[{text:m.content}] }))
-      ];
-      const r = await fetch(url, {
-        method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({ contents, generationConfig:{maxOutputTokens:800,temperature:0.6} })
-      });
-      if (!r.ok) throw new Error(`Gemini ${r.status}`);
-      const d = await r.json();
-      return d.candidates?.[0]?.content?.parts?.[0]?.text || '';
-    }
-    throw new Error('No hay API Key de IA configurada');
+    // Todos los proveedores fallaron (ej. ambos con cuota agotada)
+    const friendly = new Error('El asistente está muy solicitado en este momento. Por favor intenta nuevamente en unos segundos.');
+    friendly.cause = lastErr;
+    throw friendly;
   }
 
   const SYSTEM = `Eres el asistente virtual de Mesa de Ayuda de Efletexia para usuarios finales.
