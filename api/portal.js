@@ -289,7 +289,31 @@ ${comments.length?`ÚLTIMOS COMENTARIOS:\n${comments.map(c=>`- ${c.author}: ${c.
     if (!summary || !description) return res.status(400).json({ error: 'Faltan campos' });
 
     try {
-      const issueType = type === 'inc' ? 'Incident' : 'Service Request';
+      // Obtener los tipos de incidencia válidos configurados en el proyecto de Jira,
+      // en vez de asumir nombres fijos en inglés (evita el error "tipo de incidencia inválido")
+      const metaR = await fetch(
+        `${JIRA_URL}/rest/api/3/issue/createmeta?projectKeys=${JIRA_PROJ}&expand=projects.issuetypes`,
+        { headers: JH }
+      );
+      let availableTypes = [];
+      if (metaR.ok) {
+        const meta = await metaR.json();
+        availableTypes = meta.projects?.[0]?.issuetypes?.map(it => it.name) || [];
+      }
+
+      // Palabras clave a buscar según el tipo elegido por el usuario en el formulario
+      const keywords = type === 'inc'
+        ? ['incident', 'incidente', 'falla', 'bug']
+        : ['service request', 'solicitud', 'servicio', 'task', 'tarea'];
+
+      let issueType = availableTypes.find(name =>
+        keywords.some(k => name.toLowerCase().includes(k))
+      );
+      // Si no hay coincidencia por palabra clave, usar el primer tipo disponible del proyecto
+      if (!issueType) issueType = availableTypes[0];
+      // Último recurso si no se pudo leer el metadata del proyecto
+      if (!issueType) issueType = type === 'inc' ? 'Incidente' : 'Solicitud de servicio';
+
       const fullDesc = `${description}\n\n---\nInformado por: ${reporter} (${email})${app?`\nAplicación: ${app}`:''}`;
 
       const payload = {
@@ -309,7 +333,7 @@ ${comments.length?`ÚLTIMOS COMENTARIOS:\n${comments.map(c=>`- ${c.author}: ${c.
       });
       if (!r.ok) {
         const err = await r.text();
-        throw new Error(`Jira ${r.status}: ${err.slice(0,200)}`);
+        throw new Error(`Jira ${r.status}: ${err.slice(0,200)}${availableTypes.length?` | Tipos válidos del proyecto: ${availableTypes.join(', ')}`:''}`);
       }
       const data = await r.json();
       return res.status(200).json({ key: data.key, id: data.id });
