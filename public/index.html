@@ -630,7 +630,7 @@ async function sendPortalMsg() {
       portalHistory.push({ role:'assistant', content:data.response });
       appendPortalMsg('bot', data.response);
     } else {
-      appendPortalMsg('bot', data.error || 'No pude obtener respuesta. Intenta de nuevo.');
+      appendPortalMsg('bot', '⚠️ No pude obtener respuesta en este momento. Por favor intenta nuevamente en unos segundos.');
     }
   } catch(e) {
     appendPortalMsg('bot', '⚠️ Error de conexión. Intenta de nuevo.');
