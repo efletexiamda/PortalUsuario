@@ -68,6 +68,33 @@ module.exports = async function handler(req, res) {
     });
   }
 
+  const STOPWORDS = new Set(['como','cómo','para','que','qué','una','uno','unos','unas','los',
+    'las','del','con','por','favor','ayuda','ayudame','ayúdame','necesito','quiero','puedo',
+    'podria','podría','tengo','tener','hola','buenas','gracias','este','esta','estos','estas',
+    'cual','cuál','cuales','cuáles','donde','dónde','cuando','cuándo','pero','porque','sobre',
+    'hacer','hace','tiene','sido']);
+
+  function extractKeywords(text, max = 4) {
+    return [...new Set(
+      text.toLowerCase()
+        .replace(/[¿?¡!.,;:]/g,'')
+        .split(/\s+/)
+        .filter(w => w.length >= 3 && !STOPWORDS.has(w))
+    )].slice(0, max);
+  }
+
+  // Busca tickets YA RESUELTOS relacionados con una consulta en lenguaje natural.
+  // La usan tanto el chat de IA como el buscador de la Base de Conocimiento (sin IA).
+  async function findResolvedTickets(query, maxResults = 5) {
+    const keywords = extractKeywords(query);
+    if (!keywords.length) return [];
+    const clauses = keywords.map(k => `summary ~ "${k}" OR description ~ "${k}"`).join(' OR ');
+    // statusCategory = Done cubre "Resuelto", "Cerrado", "Done", etc. sin depender del idioma exacto
+    return await searchJira(
+      `project="${JIRA_PROJ}" AND statusCategory = Done AND (${clauses}) ORDER BY updated DESC`, maxResults
+    ).catch(() => []);
+  }
+
   // ── Llamar a IA ───────────────────────────────────────
   function sleep(ms) { return new Promise(res => setTimeout(res, ms)); }
 
@@ -209,34 +236,15 @@ ${comments.length?`ÚLTIMOS COMENTARIOS:\n${comments.map(c=>`- ${c.author}: ${c.
       // Preguntas generales ("¿cómo libero una OPL?", etc.): buscar en tickets YA
       // RESUELTOS palabras clave relevantes y usar su solución real como base de conocimiento.
       if (!ticketMatch && userMsg.length > 5) {
-        const STOPWORDS = new Set(['como','cómo','para','que','qué','una','uno','unos','unas','los',
-          'las','del','con','por','favor','ayuda','ayudame','ayúdame','necesito','quiero','puedo',
-          'podria','podría','tengo','tener','hola','buenas','gracias','este','esta','estos','estas',
-          'cual','cuál','cuales','cuáles','donde','dónde','cuando','cuándo','pero','porque','sobre',
-          'hacer','hace','tiene','sido']);
-        const keywords = [...new Set(
-          userMsg.toLowerCase()
-            .replace(/[¿?¡!.,;:]/g,'')
-            .split(/\s+/)
-            .filter(w => w.length >= 3 && !STOPWORDS.has(w))
-        )].slice(0, 4);
-
-        if (keywords.length > 0) {
-          const clauses = keywords.map(k => `summary ~ "${k}" OR description ~ "${k}"`).join(' OR ');
-          // statusCategory = Done cubre "Resuelto", "Cerrado", "Done", etc. sin depender del idioma exacto
-          const tickets = await searchJira(
-            `project="${JIRA_PROJ}" AND statusCategory = Done AND (${clauses}) ORDER BY updated DESC`, 5
-          ).catch(() => []);
-
-          if (tickets.length) {
-            jiraCtx = `\n\nTICKETS RESUELTOS SIMILARES (usa la solución real aplicada en estos casos para explicar los pasos al usuario):\n${
-              tickets.map(t => {
-                const lastComments = (t.comments||[]).slice(-2)
-                  .map(c => `  · ${c.author}: ${c.text}`).join('\n');
-                return `- ${t.key} [${t.status}]: ${t.summary}\n  Descripción: ${t.description?.slice(0,200)||'—'}${lastComments?`\n  Solución/comentarios:\n${lastComments}`:''}`;
-              }).join('\n')
-            }`;
-          }
+        const tickets = await findResolvedTickets(userMsg, 5);
+        if (tickets.length) {
+          jiraCtx = `\n\nTICKETS RESUELTOS SIMILARES (usa la solución real aplicada en estos casos para explicar los pasos al usuario):\n${
+            tickets.map(t => {
+              const lastComments = (t.comments||[]).slice(-2)
+                .map(c => `  · ${c.author}: ${c.text}`).join('\n');
+              return `- ${t.key} [${t.status}]: ${t.summary}\n  Descripción: ${t.description?.slice(0,200)||'—'}${lastComments?`\n  Solución/comentarios:\n${lastComments}`:''}`;
+            }).join('\n')
+          }`;
         }
       }
     } catch {}
@@ -453,6 +461,39 @@ ${comments.length?`ÚLTIMOS COMENTARIOS:\n${comments.map(c=>`- ${c.author}: ${c.
     } catch(e) {
       return res.status(500).json({ error: e.message });
     }
+  }
+
+  // ══════════════════════════════════════════════════════
+  //  ACCIÓN: searchKnowledge (buscador de la Base de Conocimiento, sin IA)
+  // ══════════════════════════════════════════════════════
+  if (action === 'searchKnowledge') {
+    const { query } = body;
+    if (!query || query.trim().length < 3) return res.status(400).json({ error: 'Escribe al menos 3 caracteres' });
+
+    try {
+      const tickets = await findResolvedTickets(query, 6);
+      const results = tickets.map(t => ({
+        key:         t.key,
+        summary:     t.summary,
+        description: t.description,
+        solution:    (t.comments||[]).slice(-2).map(c => `${c.author}: ${c.text}`).join(' · '),
+        area:        t.area
+      }));
+      return res.status(200).json({ results });
+    } catch(e) {
+      return res.status(500).json({ error: e.message });
+    }
+  }
+
+  // ══════════════════════════════════════════════════════
+  //  ACCIÓN: feedback (¿te sirvió esta respuesta?)
+  // ══════════════════════════════════════════════════════
+  if (action === 'feedback') {
+    const { source, query, ticketKey, articleId, helpful } = body;
+    // No hay base de datos propia: se registra en los logs de Vercel para revisión periódica.
+    // Si el contenido no ayudó, queda registrado para saber qué artículos/tickets faltan o mejorar.
+    console.log(`[feedback] fuente=${source||'—'} util=${helpful} query="${query||''}" ticket=${ticketKey||'—'} articulo=${articleId||'—'}`);
+    return res.status(200).json({ ok: true });
   }
 
   return res.status(400).json({ error: `Acción desconocida: "${action}"` });
