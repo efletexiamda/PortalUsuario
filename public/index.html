@@ -392,6 +392,10 @@ body{font-family:'Outfit',sans-serif;background:#000;color:var(--tx);min-height:
           onkeydown="if(event.key==='Enter')searchMyTickets()">
         <button class="tbtn" onclick="searchMyTickets()">Buscar</button>
       </div>
+      <div id="ticketHistoryNote" style="font-size:11px;color:var(--mut);margin-top:6px;display:none">
+        Mostrando tu historial de tickets automáticamente ·
+        <a href="#" onclick="clearSavedUser();return false" style="color:var(--p)">no soy yo, buscar otro</a>
+      </div>
       <div id="ticketList"></div>
       <div id="ticketDetail"></div>
     </div>
@@ -457,6 +461,14 @@ body{font-family:'Outfit',sans-serif;background:#000;color:var(--tx);min-height:
             <option value="Ruteador">Ruteador</option>
             <option value="Otra">Otra</option>
           </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Adjuntar archivo (opcional)</label>
+          <input class="form-input" type="file" id="ticketAttachment" multiple
+            style="padding:9px 14px">
+          <div style="font-size:11px;color:var(--mut);margin-top:4px">
+            Puedes adjuntar una o más capturas/archivos · máx. 3 MB por archivo
+          </div>
         </div>
         <button class="submit-btn" onclick="createTicket()" id="createBtn">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2">
@@ -583,6 +595,29 @@ function setTab(i) {
     document.getElementById(`ptab${j}`).classList.toggle('on', j===i);
     document.getElementById(`panel${j}`).style.display = j===i ? 'block' : 'none';
   }
+  // Al entrar a "Mis Tickets", si ya conocemos el correo del usuario (por un ticket
+  // creado antes en este navegador), cargamos automáticamente su historial.
+  if (i === 1) {
+    const savedEmail = localStorage.getItem('efletexia_user_email');
+    const input = document.getElementById('ticketSearchInput');
+    const note  = document.getElementById('ticketHistoryNote');
+    if (savedEmail && !input.value.trim()) {
+      input.value = savedEmail;
+      note.style.display = 'block';
+      searchMyTickets();
+    } else {
+      note.style.display = 'none';
+    }
+  }
+}
+
+function clearSavedUser() {
+  localStorage.removeItem('efletexia_user_email');
+  localStorage.removeItem('efletexia_user_name');
+  document.getElementById('ticketSearchInput').value = '';
+  document.getElementById('ticketHistoryNote').style.display = 'none';
+  document.getElementById('ticketList').innerHTML = '';
+  document.getElementById('userStats').style.display = 'none';
 }
 
 /* ── BÚSQUEDA HERO ─────────────────────────────── */
@@ -759,6 +794,17 @@ async function showTicketDetail(key) {
         <div class="td-field"><div class="td-label">Creado</div><div class="td-value">${t.created}</div></div>
       </div>
       ${t.description?`<div class="td-field"><div class="td-label">Descripción</div><div class="td-desc">${t.description.slice(0,500)}</div></div>`:''}
+      ${t.attachments?.length?`
+        <div class="td-field">
+          <div class="td-label">Adjuntos (${t.attachments.length})</div>
+          ${t.attachments.map(a=>`
+            <div style="margin-top:6px">
+              <a href="#" onclick="downloadAttachment('${a.url.replace(/'/g,"\\'")}','${a.filename.replace(/'/g,"\\'")}');return false"
+                 style="color:var(--p);font-size:12px;text-decoration:underline">
+                📎 ${a.filename} (${(a.size/1024).toFixed(0)} KB)
+              </a>
+            </div>`).join('')}
+        </div>`:''}
       ${t.comments?.length?`
         <div class="td-comments">
           <div class="td-label" style="margin-bottom:8px">Comentarios (${t.comments.length})</div>
@@ -773,7 +819,32 @@ async function showTicketDetail(key) {
   }
 }
 
+/* ── DESCARGAR ADJUNTO ─────────────────────────── */
+async function downloadAttachment(url, filename) {
+  try {
+    const r = await fetch(`${API}?action=downloadAttachment&url=${encodeURIComponent(url)}`);
+    if (!r.ok) { alert('No se pudo descargar el adjunto.'); return; }
+    const blob = await r.blob();
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = filename;
+    link.click();
+    URL.revokeObjectURL(link.href);
+  } catch(e) {
+    alert('No se pudo descargar el adjunto.');
+  }
+}
+
 /* ── CREAR TICKET ──────────────────────────────── */
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload  = () => resolve(reader.result.split(',')[1]);
+    reader.onerror = () => reject(new Error('No se pudo leer el archivo'));
+    reader.readAsDataURL(file);
+  });
+}
+
 async function createTicket() {
   const summary  = document.getElementById('ticketSummary').value.trim();
   const desc     = document.getElementById('ticketDesc').value.trim();
@@ -782,9 +853,17 @@ async function createTicket() {
   const type     = document.getElementById('ticketType').value;
   const area     = document.getElementById('ticketArea').value;
   const app      = document.getElementById('ticketApp').value;
+  const files    = Array.from(document.getElementById('ticketAttachment').files || []);
 
   if (!summary||!desc||!reporter||!email) {
     alert('Por favor completa todos los campos obligatorios (*)'); return;
+  }
+
+  const MAX_SIZE = 3 * 1024 * 1024; // 3 MB por archivo
+  const oversized = files.find(f => f.size > MAX_SIZE);
+  if (oversized) {
+    alert(`El archivo "${oversized.name}" supera el límite de 3 MB. Elige un archivo más pequeño.`);
+    return;
   }
 
   const btn = document.getElementById('createBtn');
@@ -797,10 +876,38 @@ async function createTicket() {
     });
     const data = await r.json();
     if (data.key) {
+      // Guardamos el correo/nombre en este navegador para mostrar el historial
+      // automáticamente la próxima vez que el usuario abra "Mis Tickets".
+      localStorage.setItem('efletexia_user_email', email);
+      localStorage.setItem('efletexia_user_name', reporter);
+
+      let attachNote = '';
+      if (files.length) {
+        btn.innerHTML = '⏳ Subiendo adjuntos...';
+        let uploaded = 0;
+        for (const file of files) {
+          try {
+            const dataBase64 = await fileToBase64(file);
+            const ar = await fetch(API, {
+              method:'POST', headers:{'Content-Type':'application/json'},
+              body: JSON.stringify({
+                action:'addAttachment', key:data.key,
+                filename:file.name, contentType:file.type, dataBase64
+              })
+            });
+            const ad = await ar.json();
+            if (ad.ok) uploaded++;
+          } catch {}
+        }
+        attachNote = uploaded === files.length
+          ? ` Se adjuntaron ${uploaded} archivo(s) correctamente.`
+          : ` Se adjuntaron ${uploaded} de ${files.length} archivo(s); algunos no se pudieron subir.`;
+      }
+
       document.getElementById('newTicketForm').style.display = 'none';
       document.getElementById('successMsg').classList.add('show');
       document.getElementById('successDetail').textContent =
-        `Tu ticket ${data.key} ha sido creado y será atendido pronto. Puedes consultarlo en "Mis Tickets".`;
+        `Tu ticket ${data.key} ha sido creado y será atendido pronto. Puedes consultarlo en "Mis Tickets".${attachNote}`;
     } else {
       alert('Error al crear el ticket: ' + (data.error||'Intenta de nuevo'));
     }
