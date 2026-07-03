@@ -63,7 +63,92 @@ body{font-family:'Outfit',sans-serif;background:#000;color:var(--tx);min-height:
 .ptab:not(.on):hover{border-color:var(--brd2);color:var(--tx);background:#1a1a1a}
 
 /* ── MAIN CONTENT ────────────────────────────── */
-.main{max-width:900px;margin:0 auto;padding:24px;background:var(--bg);min-height:60vh}
+.layout-grid{max-width:1200px;margin:0 auto;padding:24px;display:grid;
+  grid-template-columns:1fr 300px;gap:20px;align-items:start}
+.main{padding:0;background:var(--bg);min-height:40vh}
+@media (max-width:860px){.layout-grid{grid-template-columns:1fr}}
+
+/* ── NAVBAR ──────────────────────────────────── */
+.navbar{position:sticky;top:0;z-index:50;display:flex;align-items:center;
+  justify-content:space-between;padding:14px 28px;background:rgba(0,0,0,.85);
+  backdrop-filter:blur(10px);border-bottom:1px solid var(--brd)}
+.navbar-brand{display:flex;align-items:center;gap:12px}
+.navbar-logo{width:40px;height:40px;border-radius:11px;
+  background:linear-gradient(135deg,var(--p),var(--p2));color:#fff;
+  display:flex;align-items:center;justify-content:center;font-weight:900;font-size:15px}
+.navbar-name{font-size:15px;font-weight:800;color:var(--tx);line-height:1.2}
+.navbar-sub{font-size:11px;color:var(--mut)}
+.navbar-links{display:flex;align-items:center;gap:6px}
+.navbar-link{display:flex;align-items:center;gap:6px;padding:9px 16px;border-radius:10px;
+  font-size:12.5px;font-weight:700;color:var(--mut);cursor:pointer;border:1px solid transparent;
+  background:none;font-family:inherit;transition:all .15s}
+.navbar-link:hover{color:var(--tx);background:rgba(255,255,255,.04)}
+.navbar-link.on{color:var(--tx);background:rgba(124,58,237,.15);border-color:rgba(124,58,237,.4)}
+.navbar-cta{padding:9px 18px;border-radius:10px;font-size:12.5px;font-weight:800;color:#fff;
+  background:linear-gradient(135deg,var(--p),var(--p2));border:none;cursor:pointer;font-family:inherit;
+  display:flex;align-items:center;gap:6px}
+.navbar-avatar{width:36px;height:36px;border-radius:50%;background:var(--surf2);
+  border:1px solid var(--brd2);display:flex;align-items:center;justify-content:center;
+  color:var(--mut);font-size:15px;cursor:pointer}
+.navbar-right{display:flex;align-items:center;gap:10px}
+@media (max-width:860px){.navbar-links{display:none}}
+
+/* ── HERO DECORATIVO ─────────────────────────── */
+.hero{position:relative;overflow:hidden;
+  background:radial-gradient(ellipse 60% 80% at 15% 20%,rgba(124,58,237,.35),transparent 60%),
+             radial-gradient(ellipse 50% 70% at 90% 10%,rgba(79,70,229,.3),transparent 60%),
+             radial-gradient(ellipse 60% 60% at 50% 100%,rgba(124,58,237,.18),transparent 65%),
+             #000}
+.hero-blob{position:absolute;border-radius:50%;filter:blur(60px);opacity:.35;pointer-events:none}
+.hero-title-line{font-size:34px;font-weight:900;color:var(--tx);position:relative;z-index:1;letter-spacing:-.5px}
+.hero-title-line .grad{background:linear-gradient(135deg,#c084fc,var(--p));
+  -webkit-background-clip:text;background-clip:text;color:transparent}
+
+/* ── TARJETAS DE FUNCIONES ───────────────────── */
+.feature-cards{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;
+  max-width:1200px;margin:0 auto;padding:0 24px 24px;position:relative;z-index:1}
+@media (max-width:860px){.feature-cards{grid-template-columns:1fr 1fr}}
+.feature-card{display:flex;align-items:center;gap:12px;background:var(--surf);
+  border:1px solid var(--brd);border-radius:14px;padding:16px;cursor:pointer;
+  transition:all .2s;text-align:left}
+.feature-card:hover{border-color:rgba(124,58,237,.5);transform:translateY(-1px)}
+.feature-card.on{border-color:var(--p);background:rgba(124,58,237,.08)}
+.feature-ico{width:42px;height:42px;border-radius:10px;display:flex;align-items:center;
+  justify-content:center;font-size:19px;flex-shrink:0}
+.feature-txt{flex:1;min-width:0}
+.feature-title{font-size:13px;font-weight:800;color:var(--tx)}
+.feature-sub{font-size:11px;color:var(--mut);margin-top:1px}
+.feature-arrow{color:var(--mut);flex-shrink:0}
+
+/* ── SIDEBAR: ACCESOS RÁPIDOS ────────────────── */
+.sidebar{display:flex;flex-direction:column;gap:16px;position:sticky;top:80px}
+.qa-card{background:var(--surf);border:1px solid var(--brd);border-radius:16px;padding:18px}
+.qa-title{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:800;
+  color:var(--tx);margin-bottom:12px}
+.qa-link{display:flex;align-items:center;justify-content:space-between;gap:8px;
+  padding:11px 4px;border-bottom:1px solid var(--brd);cursor:pointer;
+  font-size:12.5px;font-weight:600;color:var(--mut);background:none;border-left:none;
+  border-right:none;border-top:none;width:100%;font-family:inherit;text-align:left;transition:color .15s}
+.qa-link:last-of-type{border-bottom:none}
+.qa-link:hover{color:var(--tx)}
+.qa-link-l{display:flex;align-items:center;gap:8px}
+.status-card{background:var(--surf);border:1px solid var(--brd);border-radius:16px;padding:16px}
+.status-row{display:flex;align-items:center;justify-content:space-between}
+.status-name{display:flex;align-items:center;gap:8px;font-size:12.5px;font-weight:700;color:var(--tx)}
+.status-dot{width:8px;height:8px;border-radius:50%;background:#4ade80;
+  box-shadow:0 0 8px #4ade80;flex-shrink:0}
+.status-pct{font-size:15px;font-weight:900;color:#4ade80}
+.status-note{font-size:11px;color:var(--mut);margin-top:4px}
+
+/* ── FOOTER ──────────────────────────────────── */
+.footer{border-top:1px solid var(--brd);padding:20px 28px;display:flex;
+  align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;
+  font-size:11.5px;color:var(--mut)}
+.footer-links{display:flex;gap:20px}
+.footer-links a{color:var(--mut);text-decoration:none}
+.footer-links a:hover{color:var(--tx)}
+.footer-heart{color:#f472b6}
+@media (max-width:600px){.footer{justify-content:center;text-align:center}}
 
 /* ── CARDS ───────────────────────────────────── */
 .card{background:var(--surf);border:1px solid var(--brd);border-radius:16px;
@@ -307,11 +392,33 @@ body{font-family:'Outfit',sans-serif;background:#000;color:var(--tx);min-height:
 </head>
 <body>
 
+<!-- NAVBAR -->
+<nav class="navbar">
+  <div class="navbar-brand">
+    <div class="navbar-logo">EF</div>
+    <div>
+      <div class="navbar-name">EFLETEXIA</div>
+      <div class="navbar-sub">Mesa de Ayuda</div>
+    </div>
+  </div>
+  <div class="navbar-links">
+    <button class="navbar-link on" id="navInicio" onclick="goHome()">🏠 Inicio</button>
+    <button class="navbar-link" id="navMisTickets" onclick="setTab(1)">🎫 Mis Tickets</button>
+    <button class="navbar-link" id="navBaseConoc" onclick="setTab(3)">📚 Base de Conocimiento</button>
+  </div>
+  <div class="navbar-right">
+    <button class="navbar-cta" onclick="setTab(2)">➕ Nuevo Ticket</button>
+    <div class="navbar-avatar">👤</div>
+  </div>
+</nav>
+
 <!-- HERO -->
 <div class="hero">
-  <div class="hero-logo-fb" style="margin:32px auto 0">EF</div>
-  <h1 style="font-size:24px;font-weight:900;color:var(--tx);margin-top:14px">PORTAL DE USUARIO EFLETEXIA</h1>
-  <div class="hero-badge" style="margin-top:16px"><span class="dot"></span>Portal en línea · Mesa de Ayuda</div>
+  <div class="hero-blob" style="width:340px;height:340px;background:#7c3aed;top:-100px;left:-80px"></div>
+  <div class="hero-blob" style="width:280px;height:280px;background:#4f46e5;top:-60px;right:-60px"></div>
+  <div class="hero-blob" style="width:260px;height:260px;background:#7c3aed;bottom:-140px;left:45%"></div>
+  <div class="hero-badge" style="margin-top:36px"><span class="dot"></span>Portal en línea · Mesa de Ayuda</div>
+  <h1 class="hero-title-line">Portal de Usuario <span class="grad">Efletexia</span></h1>
   <p class="hero-sub">Consulta tus tickets, crea solicitudes o chatea con nuestro Agente IA</p>
 
   <!-- Búsqueda rápida -->
@@ -334,22 +441,43 @@ body{font-family:'Outfit',sans-serif;background:#000;color:var(--tx);min-height:
   </div>
 </div>
 
-<!-- TABS -->
-<div class="portal-tabs">
-  <button class="ptab on" onclick="setTab(0)" id="ptab0">
-    🤖 Asistente IA
+<!-- TARJETAS DE FUNCIONES -->
+<div class="feature-cards">
+  <button class="feature-card on" id="fcard0" onclick="setTab(0)">
+    <div class="feature-ico" style="background:rgba(124,58,237,.15)">🤖</div>
+    <div class="feature-txt">
+      <div class="feature-title">Asistente IA</div>
+      <div class="feature-sub">Respuestas instantáneas</div>
+    </div>
+    <div class="feature-arrow">→</div>
   </button>
-  <button class="ptab" onclick="setTab(1)" id="ptab1">
-    🎫 Mis Tickets
+  <button class="feature-card" id="fcard1" onclick="setTab(1)">
+    <div class="feature-ico" style="background:rgba(234,179,8,.15)">🎫</div>
+    <div class="feature-txt">
+      <div class="feature-title">Mis Tickets</div>
+      <div class="feature-sub">Ver y dar seguimiento</div>
+    </div>
+    <div class="feature-arrow">→</div>
   </button>
-  <button class="ptab" onclick="setTab(2)" id="ptab2">
-    ➕ Nuevo Ticket
+  <button class="feature-card" id="fcard2" onclick="setTab(2)">
+    <div class="feature-ico" style="background:rgba(74,222,128,.15)">➕</div>
+    <div class="feature-txt">
+      <div class="feature-title">Nuevo Ticket</div>
+      <div class="feature-sub">Crear una solicitud</div>
+    </div>
+    <div class="feature-arrow">→</div>
   </button>
-  <button class="ptab" onclick="setTab(3)" id="ptab3">
-    📚 Base de Conocimiento
+  <button class="feature-card" id="fcard3" onclick="setTab(3)">
+    <div class="feature-ico" style="background:rgba(59,130,246,.15)">📚</div>
+    <div class="feature-txt">
+      <div class="feature-title">Base de Conocimiento</div>
+      <div class="feature-sub">Artículos y guías</div>
+    </div>
+    <div class="feature-arrow">→</div>
   </button>
 </div>
 
+<div class="layout-grid">
 <div class="main">
 
   <!-- ══ TAB 0: ASISTENTE IA ══ -->
@@ -643,6 +771,46 @@ body{font-family:'Outfit',sans-serif;background:#000;color:var(--tx);min-height:
 
 </div>
 
+<!-- SIDEBAR: ACCESOS RÁPIDOS -->
+<aside class="sidebar">
+  <div class="qa-card">
+    <div class="qa-title">⚡ Accesos rápidos</div>
+    <button class="qa-link" onclick="setTab(3)">
+      <span class="qa-link-l">📄 Políticas y procedimientos</span> <span>›</span>
+    </button>
+    <button class="qa-link" onclick="goQuickTicket('inc')">
+      <span class="qa-link-l">⚠️ Reportar un incidente</span> <span>›</span>
+    </button>
+    <button class="qa-link" onclick="goQuickTicket('sol')">
+      <span class="qa-link-l">🔑 Solicitar acceso</span> <span>›</span>
+    </button>
+    <button class="qa-link" onclick="setTab(1)">
+      <span class="qa-link-l">🕐 Estado de mis tickets</span> <span>›</span>
+    </button>
+  </div>
+
+  <div class="status-card">
+    <div class="status-row">
+      <div class="status-name"><span class="status-dot"></span>Estado del sistema</div>
+      <div class="status-pct">99.9%</div>
+    </div>
+    <div class="status-note">Todos los sistemas operativos · Uptime</div>
+  </div>
+</aside>
+
+</div><!-- /layout-grid -->
+
+<!-- FOOTER -->
+<footer class="footer">
+  <div>© 2026 Efletexia. Todos los derechos reservados.</div>
+  <div class="footer-links">
+    <a href="#">Política de Privacidad</a>
+    <a href="#">Términos de Servicio</a>
+    <a href="#">Contacto</a>
+  </div>
+  <div>Desarrollado con <span class="footer-heart">♥</span> para ti</div>
+</footer>
+
 <script>
 const API = '/api/portal';
 let portalHistory = [];
@@ -653,9 +821,13 @@ let curTab = 0;
 function setTab(i) {
   curTab = i;
   for (let j=0; j<4; j++) {
-    document.getElementById(`ptab${j}`).classList.toggle('on', j===i);
+    document.getElementById(`fcard${j}`).classList.toggle('on', j===i);
     document.getElementById(`panel${j}`).style.display = j===i ? 'block' : 'none';
   }
+  document.getElementById('navInicio').classList.toggle('on', i===0);
+  document.getElementById('navMisTickets').classList.toggle('on', i===1);
+  document.getElementById('navBaseConoc').classList.toggle('on', i===3);
+  document.querySelector('.layout-grid').scrollIntoView({ behavior:'smooth', block:'start' });
   // Al entrar a "Mis Tickets", si ya conocemos el correo del usuario (por un ticket
   // creado antes en este navegador), cargamos automáticamente su historial.
   if (i === 1) {
@@ -670,6 +842,16 @@ function setTab(i) {
       note.style.display = 'none';
     }
   }
+}
+
+function goHome() {
+  setTab(0);
+  window.scrollTo({ top:0, behavior:'smooth' });
+}
+
+function goQuickTicket(type) {
+  setTab(2);
+  document.getElementById('ticketType').value = type;
 }
 
 function clearSavedUser() {
