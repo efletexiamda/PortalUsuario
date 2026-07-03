@@ -225,16 +225,31 @@ ${comments.length?`ÚLTIMOS COMENTARIOS:\n${comments.map(c=>`- ${c.author}: ${c.
     if (!query) return res.status(400).json({ error: 'Falta query' });
 
     try {
-      const isKey = query.match(/^TK[\s-]?(\d+)$/i);
+      const isKey   = query.match(/^TK[\s-]?(\d+)$/i);
+      const isEmail = query.match(/^[^\s@]+@[^\s@]+\.[^\s@]+$/);
       let jql;
       if (isKey) {
         const key = `${JIRA_PROJ}-${isKey[1]}`;
         jql = `key = "${key}"`;
+      } else if (isEmail) {
+        // Coincidencia exacta por correo del informador (historial del usuario)
+        jql = `project="${JIRA_PROJ}" AND reporter = "${query}" ORDER BY created DESC`;
       } else {
         jql = `project="${JIRA_PROJ}" AND (reporter~"${query}" OR summary~"${query}") ORDER BY created DESC`;
       }
 
-      const tickets = await searchJira(jql, 20);
+      let tickets = await searchJira(jql, 20).catch(err => {
+        if (isEmail) return null; // señal de que falló la búsqueda exacta por correo
+        throw err;
+      });
+      // Si la búsqueda exacta por correo no trajo resultados (o falló), reintenta
+      // buscando de forma aproximada por el nombre de usuario dentro del correo.
+      if (isEmail && (!tickets || tickets.length === 0)) {
+        const namePart = query.split('@')[0].replace(/[._-]/g, ' ');
+        const fallbackJql = `project="${JIRA_PROJ}" AND reporter~"${namePart}" ORDER BY created DESC`;
+        tickets = await searchJira(fallbackJql, 20).catch(() => []);
+      }
+
       const stats = {
         total:    tickets.length,
         pending:  tickets.filter(t => !['Resuelto','Cancelado'].some(s => t.status.includes(s))).length,
@@ -274,7 +289,12 @@ ${comments.length?`ÚLTIMOS COMENTARIOS:\n${comments.map(c=>`- ${c.author}: ${c.
         created:     (f.created||'').slice(0,10),
         area:        f.customfield_10393?.value||'',
         description: extractText(f.description),
-        comments
+        comments,
+        attachments: (f.attachment||[]).map(a => ({
+          filename: a.filename,
+          url:      a.content,
+          size:     a.size
+        }))
       });
     } catch(e) {
       return res.status(500).json({ error: e.message });
@@ -337,6 +357,59 @@ ${comments.length?`ÚLTIMOS COMENTARIOS:\n${comments.map(c=>`- ${c.author}: ${c.
       }
       const data = await r.json();
       return res.status(200).json({ key: data.key, id: data.id });
+    } catch(e) {
+      return res.status(500).json({ error: e.message });
+    }
+  }
+
+  // ══════════════════════════════════════════════════════
+  //  ACCIÓN: addAttachment
+  // ══════════════════════════════════════════════════════
+  if (action === 'addAttachment') {
+    const { key, filename, contentType, dataBase64 } = body;
+    if (!key || !filename || !dataBase64) return res.status(400).json({ error: 'Faltan campos' });
+
+    try {
+      const buffer = Buffer.from(dataBase64, 'base64');
+      const blob = new Blob([buffer], { type: contentType || 'application/octet-stream' });
+      const form = new FormData();
+      form.append('file', blob, filename);
+
+      const r = await fetch(`${JIRA_URL}/rest/api/3/issue/${key}/attachments`, {
+        method: 'POST',
+        headers: {
+          'Authorization':      `Basic ${jiraAuth}`,
+          'X-Atlassian-Token':  'no-check'
+          // No se define Content-Type: fetch arma el multipart/form-data correcto a partir de FormData
+        },
+        body: form
+      });
+      if (!r.ok) {
+        const err = await r.text();
+        throw new Error(`Jira ${r.status}: ${err.slice(0,200)}`);
+      }
+      const data = await r.json();
+      return res.status(200).json({ ok: true, attachment: data[0] || null });
+    } catch(e) {
+      return res.status(500).json({ error: e.message });
+    }
+  }
+
+  // ══════════════════════════════════════════════════════
+  //  ACCIÓN: downloadAttachment (proxy autenticado hacia Jira)
+  // ══════════════════════════════════════════════════════
+  if (action === 'downloadAttachment') {
+    const { url } = body;
+    if (!url) return res.status(400).json({ error: 'Falta url' });
+    if (!url.startsWith(JIRA_URL)) return res.status(400).json({ error: 'URL no permitida' });
+
+    try {
+      const r = await fetch(url, { headers: JH });
+      if (!r.ok) throw new Error(`No se pudo descargar el adjunto (${r.status})`);
+      const buffer = Buffer.from(await r.arrayBuffer());
+      res.setHeader('Content-Type', r.headers.get('content-type') || 'application/octet-stream');
+      res.setHeader('Content-Disposition', r.headers.get('content-disposition') || 'inline');
+      return res.status(200).send(buffer);
     } catch(e) {
       return res.status(500).json({ error: e.message });
     }
