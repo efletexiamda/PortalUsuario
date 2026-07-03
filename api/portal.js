@@ -81,7 +81,12 @@ module.exports = async function handler(req, res) {
         max_tokens: 800, temperature: 0.6
       })
     });
-    if (!r.ok) { const err = new Error(`Groq ${r.status}`); err.status = r.status; throw err; }
+    if (!r.ok) {
+      const detail = await r.text().catch(()=>'');
+      const err = new Error(`Groq ${r.status}: ${detail.slice(0,300)}`);
+      err.status = r.status; err.provider = 'Groq';
+      throw err;
+    }
     const d = await r.json();
     return d.choices?.[0]?.message?.content || '';
   }
@@ -97,19 +102,27 @@ module.exports = async function handler(req, res) {
       method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({ contents, generationConfig:{maxOutputTokens:800,temperature:0.6} })
     });
-    if (!r.ok) { const err = new Error(`Gemini ${r.status}`); err.status = r.status; throw err; }
+    if (!r.ok) {
+      const detail = await r.text().catch(()=>'');
+      const err = new Error(`Gemini ${r.status}: ${detail.slice(0,300)}`);
+      err.status = r.status; err.provider = 'Gemini';
+      // Si Google indica que la cuota diaria está agotada (no solo por minuto), reintentar no sirve de nada
+      err.quotaExhausted = /RESOURCE_EXHAUSTED|quota/i.test(detail) && /perday|daily|PerDay/i.test(detail);
+      throw err;
+    }
     const d = await r.json();
     return d.candidates?.[0]?.content?.parts?.[0]?.text || '';
   }
 
-  // Reintenta con backoff cuando el proveedor responde 429 (cuota agotada / rate limit)
+  // Reintenta con backoff cuando el proveedor responde 429 (cuota agotada / rate limit).
+  // Si la cuota está agotada por completo (no solo un límite por minuto), falla rápido sin reintentar.
   async function withRetry(fn, retries = 2, delayMs = 800) {
     for (let attempt = 0; attempt <= retries; attempt++) {
       try {
         return await fn();
       } catch (e) {
         const is429 = e.status === 429 || /429/.test(e.message || '');
-        if (!is429 || attempt === retries) throw e;
+        if (!is429 || e.quotaExhausted || attempt === retries) throw e;
         await sleep(delayMs * (attempt + 1));
       }
     }
@@ -117,15 +130,17 @@ module.exports = async function handler(req, res) {
 
   async function callAI(messages, system) {
     const providers = [];
-    if (GROQ_KEY)   providers.push(() => withRetry(() => callGroq(messages, system)));
-    if (GEMINI_KEY) providers.push(() => withRetry(() => callGemini(messages, system)));
-    if (!providers.length) throw new Error('No hay API Key de IA configurada');
+    if (GROQ_KEY)   providers.push({ name:'Groq',   fn: () => withRetry(() => callGroq(messages, system)) });
+    if (GEMINI_KEY) providers.push({ name:'Gemini', fn: () => withRetry(() => callGemini(messages, system)) });
+    if (!providers.length) throw new Error('No hay API Key de IA configurada (GROQ_API_KEY / GEMINI_API_KEY)');
 
     let lastErr;
-    for (const call of providers) {
+    for (const p of providers) {
       try {
-        return await call();
+        return await p.fn();
       } catch (e) {
+        // Log visible en Vercel → Project → Deployments → Functions → Logs (no se muestra al usuario final)
+        console.error(`[callAI] Proveedor "${p.name}" falló:`, e.message);
         lastErr = e;
       }
     }
