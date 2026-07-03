@@ -237,6 +237,44 @@ body{font-family:'Outfit',sans-serif;background:#000;color:var(--tx);min-height:
 .nlm-embed{width:100%;height:500px;border:none;border-radius:12px;
   background:var(--surf2)}
 
+/* ── BUSCADOR DE SOLUCIONES (KB) ────────────────── */
+.kb-search{display:flex;gap:0;background:var(--surf2);
+  border:1.5px solid var(--brd2);border-radius:14px;overflow:hidden;margin-top:4px}
+.kb-search input{flex:1;background:none;border:none;outline:none;
+  padding:12px 16px;font-size:13px;font-family:inherit;color:var(--tx)}
+.kb-search button{padding:0 20px;border:none;cursor:pointer;font-family:inherit;
+  font-size:12px;font-weight:800;background:linear-gradient(135deg,var(--p),var(--p2));color:#fff}
+.kb-result{background:rgba(255,255,255,.03);border:1px solid var(--brd);
+  border-radius:12px;padding:14px;margin-top:10px}
+.kb-result-key{font-size:11px;font-weight:800;color:var(--p);margin-bottom:4px}
+.kb-result-title{font-size:13px;font-weight:700;color:var(--tx);margin-bottom:6px}
+.kb-result-desc{font-size:12px;color:var(--mut);line-height:1.6;margin-bottom:6px}
+.kb-result-sol{font-size:12px;color:#93c5fd;background:rgba(26,115,232,.08);
+  border:1px solid rgba(26,115,232,.2);border-radius:8px;padding:8px 10px;line-height:1.5}
+
+/* ── FEEDBACK ¿TE SIRVIÓ? ───────────────────────── */
+.kb-feedback{display:flex;align-items:center;gap:8px;margin-top:10px;font-size:11px;color:var(--mut)}
+.kb-fbtn{border:1px solid var(--brd2);background:var(--surf2);color:var(--mut);
+  border-radius:8px;padding:4px 10px;font-size:11px;cursor:pointer;font-family:inherit;transition:all .15s}
+.kb-fbtn:hover{border-color:var(--p);color:var(--tx)}
+.kb-fbtn.sent{opacity:.5;pointer-events:none}
+
+/* ── FAQ ACORDEÓN ────────────────────────────────── */
+.faq-cat{margin-bottom:16px}
+.faq-cat-title{font-size:11px;font-weight:800;color:var(--p);text-transform:uppercase;
+  letter-spacing:.5px;margin-bottom:8px}
+.faq-item{background:rgba(255,255,255,.03);border:1px solid var(--brd);
+  border-radius:12px;margin-bottom:8px;overflow:hidden}
+.faq-q{padding:12px 14px;cursor:pointer;display:flex;justify-content:space-between;
+  align-items:center;font-size:12.5px;font-weight:700;color:var(--tx)}
+.faq-q:hover{background:rgba(255,255,255,.03)}
+.faq-arrow{transition:transform .2s;color:var(--mut);flex-shrink:0;margin-left:10px}
+.faq-item.open .faq-arrow{transform:rotate(180deg)}
+.faq-a{max-height:0;overflow:hidden;transition:max-height .25s ease}
+.faq-item.open .faq-a{max-height:400px}
+.faq-a-inner{padding:0 14px 14px;font-size:12px;color:var(--mut);line-height:1.7}
+.faq-a-inner strong{color:var(--tx)}
+
 /* ── STATS RÁPIDAS ───────────────────────────── */
 .stats-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:16px}
 .stat-card{background:var(--surf);border:1px solid var(--brd);border-radius:12px;
@@ -490,17 +528,40 @@ body{font-family:'Outfit',sans-serif;background:#000;color:var(--tx);min-height:
     </div>
   </div>
 
-  <!-- ══ TAB 3: NOTEBOOKLM ══ -->
+  <!-- ══ TAB 3: BASE DE CONOCIMIENTO ══ -->
   <div id="panel3" style="display:none">
     <div class="nlm-wrap">
 
+      <!-- Buscador de soluciones basado en tickets resueltos -->
+      <div class="nlm-card">
+        <div class="nlm-icon">🔍</div>
+        <div class="nlm-title">Buscador de Soluciones</div>
+        <div class="nlm-desc">
+          Escribe tu problema y te mostramos cómo se resolvieron casos similares
+          anteriormente (basado en tickets ya solucionados).
+        </div>
+        <div class="kb-search">
+          <input id="kbSearchInput" placeholder="Ej: cómo libero una OPL, no tengo acceso al correo..."
+            onkeydown="if(event.key==='Enter')searchKnowledge()">
+          <button onclick="searchKnowledge()">Buscar</button>
+        </div>
+        <div id="kbResults"></div>
+      </div>
+
+      <!-- FAQ por categorías -->
+      <div class="nlm-card">
+        <div class="nlm-title">❓ Preguntas Frecuentes</div>
+        <div class="nlm-desc">Las dudas más comunes, organizadas por área. Haz clic para expandir.</div>
+        <div id="faqList"></div>
+      </div>
+
       <div class="nlm-card">
         <div class="nlm-icon">📚</div>
-        <div class="nlm-title">Base de Conocimiento con NotebookLM</div>
+        <div class="nlm-title">Análisis avanzado con NotebookLM (uso interno / gerencial)</div>
         <div class="nlm-desc">
-          Accede a nuestra base de conocimiento potenciada por IA de Google.
-          Puedes hacer preguntas en lenguaje natural sobre procedimientos,
-          soluciones y documentación de Efletexia.
+          Para reportes ejecutivos y análisis de tendencias, exporta los tickets desde Jira
+          y súbelos a NotebookLM. Pensado para supervisores, no es necesario para resolver
+          tu ticket individual.
         </div>
         <a href="https://notebooklm.google.com" target="_blank" class="nlm-btn nlm-primary">
           🚀 Abrir NotebookLM
@@ -926,6 +987,127 @@ function resetForm() {
     document.getElementById(id).value = '';
   });
 }
+
+/* ── BASE DE CONOCIMIENTO: BUSCADOR ────────────── */
+async function searchKnowledge() {
+  const q = document.getElementById('kbSearchInput').value.trim();
+  const box = document.getElementById('kbResults');
+  if (q.length < 3) { box.innerHTML = '<div style="font-size:12px;color:var(--mut);margin-top:10px">Escribe al menos 3 caracteres.</div>'; return; }
+  box.innerHTML = '<div class="loading"><div class="spinner"></div>Buscando soluciones...</div>';
+  try {
+    const r = await fetch(API, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ action:'searchKnowledge', query:q })
+    });
+    const data = await r.json();
+    const results = data.results || [];
+    if (!results.length) {
+      box.innerHTML = `
+        <div class="empty" style="padding:20px 0">
+          <div class="empty-ico">🤷</div>
+          <div class="empty-txt">No encontramos casos resueltos similares.</div>
+        </div>
+        <div style="text-align:center">
+          <button class="tbtn" onclick="goCreateTicketFrom('${q.replace(/'/g,"\\'")}')">+ Crear un ticket con este problema</button>
+        </div>`;
+      return;
+    }
+    box.innerHTML = results.map((t,i) => `
+      <div class="kb-result">
+        <div class="kb-result-key">${t.key} ${t.area?`· ${t.area}`:''}</div>
+        <div class="kb-result-title">${t.summary}</div>
+        ${t.description?`<div class="kb-result-desc">${t.description.slice(0,220)}</div>`:''}
+        ${t.solution?`<div class="kb-result-sol">💡 ${t.solution}</div>`:''}
+        <div class="kb-feedback">
+          ¿Te sirvió esta respuesta?
+          <button class="kb-fbtn" id="kbfb-yes-${i}" onclick="sendKbFeedback('${t.key}','${q.replace(/'/g,"\\'")}',true,${i})">👍 Sí</button>
+          <button class="kb-fbtn" id="kbfb-no-${i}" onclick="sendKbFeedback('${t.key}','${q.replace(/'/g,"\\'")}',false,${i})">👎 No</button>
+        </div>
+      </div>`).join('');
+  } catch(e) {
+    box.innerHTML = '<div class="empty"><div class="empty-ico">⚠️</div><div class="empty-txt">Error al buscar. Intenta de nuevo.</div></div>';
+  }
+}
+
+function goCreateTicketFrom(summary) {
+  setTab(2);
+  document.getElementById('ticketSummary').value = summary;
+}
+
+async function sendKbFeedback(ticketKey, query, helpful, i) {
+  const yesBtn = document.getElementById(`kbfb-yes-${i}`);
+  const noBtn  = document.getElementById(`kbfb-no-${i}`);
+  yesBtn.classList.add('sent'); noBtn.classList.add('sent');
+  (helpful ? yesBtn : noBtn).textContent = helpful ? '👍 ¡Gracias!' : '👎 Anotado';
+  try {
+    await fetch(API, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ action:'feedback', source:'kbSearch', query, ticketKey, helpful })
+    });
+  } catch {}
+}
+
+/* ── BASE DE CONOCIMIENTO: FAQ ──────────────────── */
+// 📝 Edita este arreglo con las preguntas/respuestas reales de Efletexia.
+const FAQ_DATA = [
+  { cat:'Accesos y Contraseñas', items: [
+    { q:'¿Cómo reseteo mi contraseña de correo/red?', a:'1. Contacta a TI mediante un <strong>Nuevo Ticket</strong> tipo "Incidente".<br>2. Indica tu usuario de red y correo alterno de contacto.<br>3. TI enviará un enlace de reseteo o una contraseña temporal.<br>4. Al ingresar por primera vez, el sistema te pedirá crear una nueva contraseña.' },
+    { q:'No tengo acceso a mi correo, ¿qué hago?', a:'Verifica primero tu conexión a internet y que el usuario/contraseña sean correctos. Si el problema persiste, crea un <strong>Nuevo Ticket</strong> con tipo "Incidente" describiendo el mensaje de error exacto que ves.' }
+  ]},
+  { cat:'OPL y Pedidos', items: [
+    { q:'¿Cómo aperturo/libero una OPL?', a:'Usa el <strong>Buscador de Soluciones</strong> de arriba escribiendo "aperturar OPL" o "liberar OPL": ahí se muestran casos reales ya resueltos con el procedimiento exacto según el tipo de OPL.' },
+    { q:'Mi OPL quedó bloqueada, ¿a quién contacto?', a:'Crea un <strong>Nuevo Ticket</strong> de tipo "Solicitud de servicio", área "Operaciones", indicando el número de OPL y el motivo del bloqueo si lo conoces.' }
+  ]},
+  { cat:'Aplicaciones (T1 / T2 / Torre de Control)', items: [
+    { q:'La aplicación no carga o se queda cargando', a:'1. Refresca la página (Ctrl+F5).<br>2. Prueba en modo incógnito para descartar problemas de caché.<br>3. Si persiste, crea un <strong>Nuevo Ticket</strong> tipo "Incidente" indicando la app afectada y adjunta una captura de pantalla del error.' },
+    { q:'Necesito acceso a una aplicación nueva', a:'Crea un <strong>Nuevo Ticket</strong> tipo "Solicitud de servicio", indicando el nombre de la aplicación y el motivo/rol que justifica el acceso.' }
+  ]},
+  { cat:'Otros', items: [
+    { q:'¿Cómo veo el estado de mi ticket?', a:'Ve a la pestaña <strong>Mis Tickets</strong> y busca por tu número de ticket (ej. TK-648) o tu correo — si ya creaste un ticket antes en este navegador, tu historial se carga automáticamente.' },
+    { q:'¿Cuánto tarda en resolverse un ticket?', a:'Depende de la prioridad y el área. Los incidentes críticos se atienden primero. Puedes consultar el avance en cualquier momento desde <strong>Mis Tickets</strong>.' }
+  ]}
+];
+
+function renderFAQ() {
+  const box = document.getElementById('faqList');
+  box.innerHTML = FAQ_DATA.map((cat, ci) => `
+    <div class="faq-cat">
+      <div class="faq-cat-title">${cat.cat}</div>
+      ${cat.items.map((item, ii) => `
+        <div class="faq-item" id="faq-${ci}-${ii}">
+          <div class="faq-q" onclick="toggleFaq(${ci},${ii})">
+            <span>${item.q}</span>
+            <span class="faq-arrow">▾</span>
+          </div>
+          <div class="faq-a"><div class="faq-a-inner">
+            ${item.a}
+            <div class="kb-feedback">
+              ¿Te sirvió?
+              <button class="kb-fbtn" id="faqfb-yes-${ci}-${ii}" onclick="sendFaqFeedback(${ci},${ii},true)">👍 Sí</button>
+              <button class="kb-fbtn" id="faqfb-no-${ci}-${ii}" onclick="sendFaqFeedback(${ci},${ii},false)">👎 No</button>
+            </div>
+          </div></div>
+        </div>`).join('')}
+    </div>`).join('');
+}
+
+function toggleFaq(ci, ii) {
+  document.getElementById(`faq-${ci}-${ii}`).classList.toggle('open');
+}
+
+async function sendFaqFeedback(ci, ii, helpful) {
+  const yesBtn = document.getElementById(`faqfb-yes-${ci}-${ii}`);
+  const noBtn  = document.getElementById(`faqfb-no-${ci}-${ii}`);
+  yesBtn.classList.add('sent'); noBtn.classList.add('sent');
+  (helpful ? yesBtn : noBtn).textContent = helpful ? '👍 ¡Gracias!' : '👎 Anotado';
+  try {
+    await fetch(API, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ action:'feedback', source:'faq', articleId:`${ci}-${ii}`, query:FAQ_DATA[ci].items[ii].q, helpful })
+    });
+  } catch {}
+}
+renderFAQ();
 
 /* ── UTILS ─────────────────────────────────────── */
 function copyText(el) {
