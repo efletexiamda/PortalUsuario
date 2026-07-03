@@ -589,10 +589,10 @@ function setTab(i) {
 function heroSearch() {
   const q = document.getElementById('heroSearch').value.trim();
   if (!q) return;
-  const ticketMatch = q.match(/TK-?\d+/i);
+  const ticketMatch = q.match(/TK[\s-]?(\d+)/i);
   if (ticketMatch) {
     setTab(1);
-    document.getElementById('ticketSearchInput').value = ticketMatch[0].toUpperCase();
+    document.getElementById('ticketSearchInput').value = `TK-${ticketMatch[1]}`;
     searchMyTickets();
   } else {
     setTab(0);
