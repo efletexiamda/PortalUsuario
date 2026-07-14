@@ -88,11 +88,28 @@ module.exports = async function handler(req, res) {
   async function findResolvedTickets(query, maxResults = 5) {
     const keywords = extractKeywords(query);
     if (!keywords.length) return [];
-    const clauses = keywords.map(k => `summary ~ "${k}" OR description ~ "${k}"`).join(' OR ');
-    // statusCategory = Done cubre "Resuelto", "Cerrado", "Done", etc. sin depender del idioma exacto
-    return await searchJira(
-      `project="${JIRA_PROJ}" AND statusCategory = Done AND (${clauses}) ORDER BY updated DESC`, maxResults
+    // Buscamos también en comentarios (donde suele estar la solución real), no solo en
+    // resumen/descripción, para no perder tickets cuya solución nunca quedó en el título.
+    const clauses = keywords.map(k => `summary ~ "${k}" OR description ~ "${k}" OR comment ~ "${k}"`).join(' OR ');
+    // Traemos un grupo más amplio de candidatos y luego los ordenamos por relevancia real
+    // (cuántas palabras clave coinciden), en vez de quedarnos solo con "más reciente".
+    const candidatePool = Math.max(maxResults * 3, 15);
+    const candidates = await searchJira(
+      `project="${JIRA_PROJ}" AND statusCategory = Done AND (${clauses}) ORDER BY updated DESC`, candidatePool
     ).catch(() => []);
+
+    if (!candidates.length) return [];
+
+    const score = (t) => {
+      const haystack = `${t.summary} ${t.description} ${(t.comments||[]).map(c=>c.text).join(' ')}`.toLowerCase();
+      return keywords.reduce((acc, k) => acc + (haystack.includes(k) ? 1 : 0), 0);
+    };
+
+    return candidates
+      .map(t => ({ ...t, _score: score(t) }))
+      .filter(t => t._score > 0)
+      .sort((a, b) => b._score - a._score || new Date(b.created||0) - new Date(a.created||0))
+      .slice(0, maxResults);
   }
 
   // ── Llamar a IA ───────────────────────────────────────
@@ -192,6 +209,16 @@ REGLAS:
 - Si no hay tickets resueltos similares en el contexto, dilo con honestidad y sugiere crear un
   "Nuevo Ticket" para que el equipo de soporte lo atienda directamente
 
+PRECISIÓN (muy importante):
+- NUNCA inventes números de ticket, estados, nombres de personas o fechas que no estén literalmente
+  en el contexto de Jira proporcionado. Si un dato no aparece ahí, no lo menciones.
+- Si el comentario/solución de un ticket es vago o genérico (ej. "se atendió la solicitud", sin detalle
+  real de los pasos), NO inventes pasos específicos para rellenar el vacío. En su lugar dilo con
+  honestidad: menciona que existe un caso similar (cita el ticket) pero que el detalle de la solución
+  no quedó documentado, y sugiere crear un ticket nuevo para recibir ayuda puntual.
+- Si varios tickets resueltos se contradicen entre sí, señala la discrepancia en vez de elegir uno al azar.
+- Distingue claramente cuándo estás describiendo un hecho confirmado en Jira vs. una recomendación general.
+
 TONO: Amable, profesional, orientado al usuario`;
 
   // ══════════════════════════════════════════════════════
@@ -213,20 +240,23 @@ TONO: Amable, profesional, orientado al usuario`;
         if (r.ok) {
           const d = await r.json();
           const f = d.fields || {};
-          const comments = (f.comment?.comments||[]).slice(-2).map(c=>({
+          const comments = (f.comment?.comments||[]).slice(-4).map(c=>({
             author: c.author?.displayName||'',
-            text: extractText(c.body).slice(0,150)
+            date: (c.created||'').slice(0,10),
+            text: extractText(c.body).slice(0,250)
           }));
-          jiraCtx = `\n\n=== DATOS DEL TICKET ${key} ===
+          jiraCtx = `\n\n=== DATOS DEL TICKET ${key} (fuente: Jira, en tiempo real) ===
 RESUMEN: ${f.summary}
 ESTADO: ${f.status?.name}
 TIPO: ${f.issuetype?.name}
+PRIORIDAD: ${f.priority?.name||'No especificada'}
 ÁREA: ${f.customfield_10393?.value||'No especificada'}
 ASIGNADO A: ${f.assignee?.displayName||'Sin asignar'}
 INFORMADOR: ${f.reporter?.displayName}
 CREADO: ${(f.created||'').slice(0,10)}
-${f.description?`DESCRIPCIÓN: ${extractText(f.description).slice(0,200)}`:''}
-${comments.length?`ÚLTIMOS COMENTARIOS:\n${comments.map(c=>`- ${c.author}: ${c.text}`).join('\n')}`:''}
+${f.resolutiondate?`RESUELTO EL: ${f.resolutiondate.slice(0,10)}`:''}
+${f.description?`DESCRIPCIÓN: ${extractText(f.description).slice(0,400)}`:''}
+${comments.length?`ÚLTIMOS COMENTARIOS (usa estos para explicar el avance/solución real):\n${comments.map(c=>`- (${c.date}) ${c.author}: ${c.text}`).join('\n')}`:'SIN COMENTARIOS: no hay actualizaciones registradas aún.'}
 ===`;
         } else {
           jiraCtx = `\n\n=== TICKET ${key} ===\nNo se encontró ningún ticket con ese número. Informa al usuario que verifique el número e intente de nuevo.\n===`;
@@ -238,11 +268,11 @@ ${comments.length?`ÚLTIMOS COMENTARIOS:\n${comments.map(c=>`- ${c.author}: ${c.
       if (!ticketMatch && userMsg.length > 5) {
         const tickets = await findResolvedTickets(userMsg, 5);
         if (tickets.length) {
-          jiraCtx = `\n\nTICKETS RESUELTOS SIMILARES (usa la solución real aplicada en estos casos para explicar los pasos al usuario):\n${
+          jiraCtx = `\n\nTICKETS RESUELTOS SIMILARES (ordenados por relevancia real a la consulta; usa la solución aplicada en estos casos para explicar los pasos al usuario):\n${
             tickets.map(t => {
-              const lastComments = (t.comments||[]).slice(-2)
+              const lastComments = (t.comments||[]).slice(-3)
                 .map(c => `  · ${c.author}: ${c.text}`).join('\n');
-              return `- ${t.key} [${t.status}]: ${t.summary}\n  Descripción: ${t.description?.slice(0,200)||'—'}${lastComments?`\n  Solución/comentarios:\n${lastComments}`:''}`;
+              return `- ${t.key} [${t.status}] (coincidencia: ${t._score} palabra(s) clave): ${t.summary}\n  Descripción: ${t.description?.slice(0,300)||'—'}${lastComments?`\n  Solución/comentarios:\n${lastComments}`:'\n  (sin comentarios registrados)'}`;
             }).join('\n')
           }`;
         }
