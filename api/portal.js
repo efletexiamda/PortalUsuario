@@ -85,13 +85,30 @@ module.exports = async function handler(req, res) {
     'cual','cuál','cuales','cuáles','donde','dónde','cuando','cuándo','pero','porque','sobre',
     'hacer','hace','tiene','sido']);
 
+  // Reduce una palabra a una raíz aproximada (quita terminaciones comunes de verbos/sustantivos en
+  // español) para que "aperturar", "apertura", "aperturo" se traten como la misma palabra clave al
+  // buscar en Jira — evita perder resultados solo por la conjugación exacta que use el usuario.
+  function stem(word) {
+    if (word.length <= 5) return word;
+    return word.replace(/(ciones|cion|mente|ando|iendo|ador|ados|adas|ada|ado|aron|amos|emos|imos|ar|er|ir|os|as|es|a|o|e)$/,'');
+  }
+
   function extractKeywords(text, max = 4) {
-    return [...new Set(
+    const words = [...new Set(
       text.toLowerCase()
         .replace(/[¿?¡!.,;:]/g,'')
         .split(/\s+/)
         .filter(w => w.length >= 3 && !STOPWORDS.has(w))
     )].slice(0, max);
+    // Para cada palabra, buscamos tanto la forma exacta como su raíz (si son distintas),
+    // así "aperturo" también encuentra tickets que dicen "apertura" o "aperturado".
+    const expanded = new Set();
+    for (const w of words) {
+      expanded.add(w);
+      const root = stem(w);
+      if (root.length >= 4 && root !== w) expanded.add(root);
+    }
+    return [...expanded];
   }
 
   // ── Detección de preguntas de conteo/estadísticas ("cuántos tickets...", "cantidad de...") ──
@@ -147,9 +164,9 @@ module.exports = async function handler(req, res) {
   async function findResolvedTickets(query, maxResults = 5) {
     const keywords = extractKeywords(query);
     if (!keywords.length) return [];
-    // Buscamos también en comentarios (donde suele estar la solución real), no solo en
-    // resumen/descripción, para no perder tickets cuya solución nunca quedó en el título.
-    const clauses = keywords.map(k => `summary ~ "${k}" OR description ~ "${k}" OR comment ~ "${k}"`).join(' OR ');
+    // Búsqueda por prefijo (wildcard "*") para que la raíz de la palabra (ej. "apertur")
+    // encuentre variantes reales como "apertura", "aperturar", "aperturado" en Jira.
+    const clauses = keywords.map(k => `summary ~ "${k}*" OR description ~ "${k}*" OR comment ~ "${k}*"`).join(' OR ');
     // Traemos un grupo más amplio de candidatos y luego los ordenamos por relevancia real
     // (cuántas palabras clave coinciden), en vez de quedarnos solo con "más reciente".
     const candidatePool = Math.max(maxResults * 3, 15);
