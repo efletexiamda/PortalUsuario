@@ -35,6 +35,17 @@ module.exports = async function handler(req, res) {
     return '';
   }
 
+  // ── Contar tickets en Jira (conteo real, sin traer todos los issues) ──
+  async function countJiraTickets(jql) {
+    const r = await fetch(`${JIRA_URL}/rest/api/3/search/approximate-count`, {
+      method: 'POST', headers: JH,
+      body: JSON.stringify({ jql })
+    });
+    if (!r.ok) throw new Error(`Jira ${r.status}`);
+    const data = await r.json();
+    return data.count;
+  }
+
   // ── Buscar tickets en Jira ────────────────────────────
   async function searchJira(jql, maxResults = 15) {
     const fields = ['summary','status','issuetype','assignee','reporter',
@@ -81,6 +92,54 @@ module.exports = async function handler(req, res) {
         .split(/\s+/)
         .filter(w => w.length >= 3 && !STOPWORDS.has(w))
     )].slice(0, max);
+  }
+
+  // ── Detección de preguntas de conteo/estadísticas ("cuántos tickets...", "cantidad de...") ──
+  const COUNT_INTENT_RE = /cu[aá]nt[oa]s?\b|cantidad\s+de|n[uú]mero\s+de|total\s+de/i;
+
+  const AREA_MAP = {
+    'ti':'TI', 'tecnologia':'TI', 'tecnología':'TI',
+    'operaciones':'Operaciones', 'operacion':'Operaciones',
+    'finanzas':'Admin. & Finanzas', 'administracion':'Admin. & Finanzas', 'administración':'Admin. & Finanzas',
+    'torre':'Torre de Control', 'proyectos':'Proyectos', 'proyecto':'Proyectos',
+    'marketing':'Marketing', 'rrhh':'Recursos Humanos', 'recursos humanos':'Recursos Humanos'
+  };
+
+  function buildCountJql(userMsg) {
+    const low = userMsg.toLowerCase();
+    const clauses = [`project="${JIRA_PROJ}"`];
+    let label = 'tickets en total';
+
+    if (/resuelt|cerrad/.test(low)) {
+      clauses.push('statusCategory = Done');
+      label = 'tickets resueltos/cerrados';
+    } else if (/pendient|abiert|sin resolver|en proceso|esperando/.test(low)) {
+      clauses.push('statusCategory != Done');
+      label = 'tickets pendientes/abiertos';
+    } else if (/cancelad/.test(low)) {
+      clauses.push('status = "Cancelado"');
+      label = 'tickets cancelados';
+    } else if (/escalad/.test(low)) {
+      clauses.push('status = "Escalado"');
+      label = 'tickets escalados';
+    } else if (/incident/.test(low)) {
+      clauses.push('issuetype = "Incidente de [System]"');
+      label = 'incidentes';
+    } else if (/solicitud/.test(low)) {
+      clauses.push('issuetype = "Solicitud de servicio"');
+      label = 'solicitudes de servicio';
+    }
+
+    for (const [kw, areaName] of Object.entries(AREA_MAP)) {
+      const re = new RegExp(`\\b${kw.replace(/\s+/g,'\\s+')}\\b`, 'i');
+      if (re.test(low)) {
+        clauses.push(`cf[10393] = "${areaName}"`);
+        label += ` del área ${areaName}`;
+        break;
+      }
+    }
+
+    return { jql: clauses.join(' AND '), label };
   }
 
   // Busca tickets YA RESUELTOS relacionados con una consulta en lenguaje natural.
@@ -210,6 +269,9 @@ REGLAS:
   "Nuevo Ticket" para que el equipo de soporte lo atienda directamente
 
 PRECISIÓN (muy importante):
+- Si el contexto incluye una sección "CONTEO REAL DESDE JIRA", reporta ese número EXACTO tal como
+  aparece, sin redondear, estimar ni combinarlo con otros números. Indica claramente a qué corresponde
+  el conteo (ej. "resueltos", "del área TI") según la etiqueta "Consulta" del contexto.
 - NUNCA inventes números de ticket, estados, nombres de personas o fechas que no estén literalmente
   en el contexto de Jira proporcionado. Si un dato no aparece ahí, no lo menciones.
 - Si el comentario/solución de un ticket es vago o genérico (ej. "se atendió la solicitud", sin detalle
@@ -263,9 +325,20 @@ ${comments.length?`ÚLTIMOS COMENTARIOS (usa estos para explicar el avance/soluc
         }
       }
 
+      // Preguntas de CONTEO/ESTADÍSTICAS ("cuántos tickets resueltos hay", "cantidad de incidentes de TI"):
+      // se resuelven con un conteo REAL contra Jira, no con una búsqueda de tickets parecidos.
+      if (!ticketMatch && COUNT_INTENT_RE.test(userMsg) && /ticket|incidente|solicitud/i.test(userMsg)) {
+        const { jql, label } = buildCountJql(userMsg);
+        try {
+          const count = await countJiraTickets(jql);
+          jiraCtx = `\n\n=== CONTEO REAL DESDE JIRA (usa este número EXACTO, no lo cambies ni lo estimes) ===\nConsulta: ${label}\nJQL ejecutado: ${jql}\nRESULTADO: ${count} ${label}\n===`;
+        } catch (e) {
+          jiraCtx = `\n\n=== CONTEO DESDE JIRA ===\nNo se pudo obtener el conteo exacto en este momento. Informa al usuario que lo intente de nuevo en unos segundos.\n===`;
+        }
+      }
       // Preguntas generales ("¿cómo libero una OPL?", etc.): buscar en tickets YA
       // RESUELTOS palabras clave relevantes y usar su solución real como base de conocimiento.
-      if (!ticketMatch && userMsg.length > 5) {
+      else if (!ticketMatch && userMsg.length > 5) {
         const tickets = await findResolvedTickets(userMsg, 5);
         if (tickets.length) {
           jiraCtx = `\n\nTICKETS RESUELTOS SIMILARES (ordenados por relevancia real a la consulta; usa la solución aplicada en estos casos para explicar los pasos al usuario):\n${
