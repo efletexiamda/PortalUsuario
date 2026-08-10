@@ -883,9 +883,19 @@ function heroSearch() {
 }
 
 /* ── CHAT PORTAL ───────────────────────────────── */
+let portalMsgCounter = 0;
+
+function renderPortalQuick(suggestions) {
+  const box = document.getElementById('portalQuick');
+  const icons = ['💬','💡','🔎','🎫'];
+  box.innerHTML = suggestions.map((s, i) =>
+    `<button class="cqbtn" onclick="portalQuickMsg('${s.replace(/'/g,"\\'")}')">${icons[i%icons.length]} ${s}</button>`
+  ).join('');
+  box.style.display = 'flex';
+}
+
 function portalQuickMsg(msg) {
   document.getElementById('portalInput').value = msg;
-  document.getElementById('portalQuick').style.display = 'none';
   sendPortalMsg();
 }
 
@@ -904,12 +914,15 @@ async function sendPortalMsg() {
   try {
     const r = await fetch(API, {
       method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ action:'chat', messages: portalHistory.slice(-8) })
+      body: JSON.stringify({ action:'chat', messages: portalHistory.slice(-14) })
     });
     const data = await r.json();
     if (data.response) {
       portalHistory.push({ role:'assistant', content:data.response });
-      appendPortalMsg('bot', data.response);
+      appendPortalMsg('bot', data.response, false, msg);
+      renderPortalQuick(data.suggestions?.length ? data.suggestions : [
+        '¿Cuál es el estado de mi ticket?', '¿Cómo libero un pedido bloqueado?', 'No puedo acceder al sistema'
+      ]);
     } else {
       appendPortalMsg('bot', '⚠️ No pude obtener respuesta en este momento. Por favor intenta nuevamente en unos segundos.');
     }
@@ -934,7 +947,7 @@ function formatMsg(text) {
   }).join('');
 }
 
-function appendPortalMsg(type, text, isHtml=false) {
+function appendPortalMsg(type, text, isHtml=false, userQuery='') {
   const msgs = document.getElementById('portalMsgs');
   const wrap = document.createElement('div');
   wrap.className = `cmsg ${type}`;
@@ -946,7 +959,41 @@ function appendPortalMsg(type, text, isHtml=false) {
   else if (type==='bot') bubble.innerHTML = formatMsg(text);
   else bubble.textContent = text;
   wrap.appendChild(av); wrap.appendChild(bubble);
-  msgs.appendChild(wrap); scrollPortal();
+
+  if (type === 'bot') {
+    const msgId = ++portalMsgCounter;
+    const fb = document.createElement('div');
+    fb.className = 'kb-feedback';
+    fb.style.marginLeft = '40px';
+    fb.innerHTML = `
+      ¿Te sirvió esta respuesta?
+      <button class="kb-fbtn" id="chatfb-yes-${msgId}" onclick="sendChatFeedback(${msgId}, true)">👍 Sí</button>
+      <button class="kb-fbtn" id="chatfb-no-${msgId}" onclick="sendChatFeedback(${msgId}, false)">👎 No</button>`;
+    fb.dataset.query = userQuery;
+    fb.dataset.reply = text.slice(0, 300);
+    msgs.appendChild(wrap);
+    msgs.appendChild(fb);
+  } else {
+    msgs.appendChild(wrap);
+  }
+  scrollPortal();
+}
+
+async function sendChatFeedback(msgId, helpful) {
+  const yesBtn = document.getElementById(`chatfb-yes-${msgId}`);
+  const noBtn  = document.getElementById(`chatfb-no-${msgId}`);
+  const container = yesBtn.closest('.kb-feedback');
+  yesBtn.classList.add('sent'); noBtn.classList.add('sent');
+  (helpful ? yesBtn : noBtn).textContent = helpful ? '👍 ¡Gracias!' : '👎 Anotado';
+  try {
+    await fetch(API, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({
+        action:'feedback', source:'asistenteChat',
+        query: container?.dataset.query || '', reply: container?.dataset.reply || '', helpful
+      })
+    });
+  } catch {}
 }
 
 function scrollPortal() {
