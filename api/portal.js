@@ -198,7 +198,7 @@ module.exports = async function handler(req, res) {
       body: JSON.stringify({
         model: 'llama-3.3-70b-versatile',
         messages: [{ role:'system', content:system }, ...messages],
-        max_tokens: 800, temperature: 0.6
+        max_tokens: 1000, temperature: 0.25
       })
     });
     if (!r.ok) {
@@ -220,7 +220,7 @@ module.exports = async function handler(req, res) {
     ];
     const r = await fetch(url, {
       method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ contents, generationConfig:{maxOutputTokens:800,temperature:0.6} })
+      body: JSON.stringify({ contents, generationConfig:{maxOutputTokens:1000,temperature:0.25} })
     });
     if (!r.ok) {
       const detail = await r.text().catch(()=>'');
@@ -309,6 +309,8 @@ TONO: Amable, profesional, orientado al usuario`;
 
     const userMsg = messages[messages.length-1]?.content || '';
     let jiraCtx = '';
+    let situation = 'default';       // rastrea qué rama se usó, para armar sugerencias de seguimiento
+    let foundKeys = [];              // tickets citados en esta respuesta (para sugerir "ver detalle de TK-XXX")
 
     try {
       // Detectar si pregunta por un ticket específico (admite "TK691", "TK-691", "TK 691", minúsculas, etc.)
@@ -337,8 +339,11 @@ ${f.resolutiondate?`RESUELTO EL: ${f.resolutiondate.slice(0,10)}`:''}
 ${f.description?`DESCRIPCIÓN: ${extractText(f.description).slice(0,400)}`:''}
 ${comments.length?`ÚLTIMOS COMENTARIOS (usa estos para explicar el avance/solución real):\n${comments.map(c=>`- (${c.date}) ${c.author}: ${c.text}`).join('\n')}`:'SIN COMENTARIOS: no hay actualizaciones registradas aún.'}
 ===`;
+          situation = 'ticket_found';
+          foundKeys = [key];
         } else {
           jiraCtx = `\n\n=== TICKET ${key} ===\nNo se encontró ningún ticket con ese número. Informa al usuario que verifique el número e intente de nuevo.\n===`;
+          situation = 'ticket_not_found';
         }
       }
 
@@ -349,14 +354,16 @@ ${comments.length?`ÚLTIMOS COMENTARIOS (usa estos para explicar el avance/soluc
         try {
           const count = await countJiraTickets(jql);
           jiraCtx = `\n\n=== CONTEO REAL DESDE JIRA (usa este número EXACTO, no lo cambies ni lo estimes) ===\nConsulta: ${label}\nJQL ejecutado: ${jql}\nRESULTADO: ${count} ${label}\n===`;
+          situation = 'count';
         } catch (e) {
           jiraCtx = `\n\n=== CONTEO DESDE JIRA ===\nNo se pudo obtener el conteo exacto en este momento. Informa al usuario que lo intente de nuevo en unos segundos.\n===`;
+          situation = 'count_error';
         }
       }
       // Preguntas generales ("¿cómo libero una OPL?", etc.): buscar en tickets YA
       // RESUELTOS palabras clave relevantes y usar su solución real como base de conocimiento.
       else if (!ticketMatch && userMsg.length > 5) {
-        const tickets = await findResolvedTickets(userMsg, 5);
+        const tickets = await findResolvedTickets(userMsg, 7);
         if (tickets.length) {
           jiraCtx = `\n\nTICKETS RESUELTOS SIMILARES (ordenados por relevancia real a la consulta; usa la solución aplicada en estos casos para explicar los pasos al usuario):\n${
             tickets.map(t => {
@@ -365,6 +372,10 @@ ${comments.length?`ÚLTIMOS COMENTARIOS (usa estos para explicar el avance/soluc
               return `- ${t.key} [${t.status}] (coincidencia: ${t._score} palabra(s) clave): ${t.summary}\n  Descripción: ${t.description?.slice(0,300)||'—'}${lastComments?`\n  Solución/comentarios:\n${lastComments}`:'\n  (sin comentarios registrados)'}`;
             }).join('\n')
           }`;
+          situation = 'similar_found';
+          foundKeys = tickets.slice(0,2).map(t => t.key);
+        } else {
+          situation = 'similar_not_found';
         }
       }
     } catch {}
@@ -377,9 +388,53 @@ ${comments.length?`ÚLTIMOS COMENTARIOS (usa estos para explicar el avance/soluc
       };
     }
 
+    // Sugerencias de seguimiento dinámicas: cambian según cómo se resolvió la consulta,
+    // para guiar al usuario al siguiente paso más probable en vez de mostrar siempre lo mismo.
+    function buildSuggestions() {
+      switch (situation) {
+        case 'ticket_found':
+          return [
+            `¿Hay comentarios nuevos en ${foundKeys[0]}?`,
+            'Consultar otro ticket',
+            'Crear un nuevo ticket'
+          ];
+        case 'ticket_not_found':
+          return [
+            'Ver mis tickets',
+            'Crear un nuevo ticket',
+            'Buscar por palabras clave'
+          ];
+        case 'count':
+        case 'count_error':
+          return [
+            'Ver el detalle de esos tickets',
+            '¿Cuántos están pendientes?',
+            'Crear un nuevo ticket'
+          ];
+        case 'similar_found':
+          return [
+            foundKeys[0] ? `Ver detalle de ${foundKeys[0]}` : 'Ver más detalles',
+            'Crear un ticket para este problema',
+            '¿Hay algo más específico?'
+          ];
+        case 'similar_not_found':
+          return [
+            'Crear un nuevo ticket',
+            'Buscar en la Base de Conocimiento',
+            'Intentar con otras palabras'
+          ];
+        default:
+          return [
+            '¿Cuál es el estado de mi ticket?',
+            '¿Cómo libero un pedido bloqueado?',
+            'No puedo acceder al sistema'
+          ];
+      }
+    }
+
     try {
       const response = await callAI(augmented, SYSTEM);
-      return res.status(200).json({ response });
+      return res.status(200).json({ response, suggestions: buildSuggestions() });
     } catch(e) {
       return res.status(500).json({ error: e.message });
     }
@@ -609,10 +664,10 @@ ${comments.length?`ÚLTIMOS COMENTARIOS (usa estos para explicar el avance/soluc
   //  ACCIÓN: feedback (¿te sirvió esta respuesta?)
   // ══════════════════════════════════════════════════════
   if (action === 'feedback') {
-    const { source, query, ticketKey, articleId, helpful } = body;
+    const { source, query, ticketKey, articleId, reply, helpful } = body;
     // No hay base de datos propia: se registra en los logs de Vercel para revisión periódica.
-    // Si el contenido no ayudó, queda registrado para saber qué artículos/tickets faltan o mejorar.
-    console.log(`[feedback] fuente=${source||'—'} util=${helpful} query="${query||''}" ticket=${ticketKey||'—'} articulo=${articleId||'—'}`);
+    // Si el contenido no ayudó, queda registrado para saber qué artículos/tickets/respuestas mejorar.
+    console.log(`[feedback] fuente=${source||'—'} util=${helpful} query="${query||''}" ticket=${ticketKey||'—'} articulo=${articleId||'—'}${reply?` respuesta="${reply.slice(0,150)}"`:''}`);
     return res.status(200).json({ ok: true });
   }
 
